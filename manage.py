@@ -503,7 +503,89 @@ def getSingalCVE():
 @app.route('/api/Predict', methods=['GET'])
 def getPredict():
     CVE = request.args.get('CVE',type=str)
-    # CVE = "CVE-2000-1254"
+    #准备数据
+    forrank = ['cve', 'commit_id', 'label']
+    feature1_cols = ['addcnt', 'delcnt', 'totalcnt', 'issue_cnt', 'web_cnt', 'bug_cnt', 'cve_cnt', 'time_dis',
+                     'inter_token_cwe_cnt', 'inter_token_cwe_ratio', 'vuln_commit_tfidf', 'cve_match',
+                     'bug_match', 'func_match', 'filepath_match', 'file_match', 'likehood', 'vuln_type_1', 'vuln_type2',
+                     'vuln_type3', 'mess_shared_ratio', 'mess_max', 'mess_sum', 'mess_mean', 'mess_var',
+                     'code_shared_num', 'code_shared_ratio', 'code_max', 'code_sum', 'code_mean', 'code_var']
+    vuln_cols = ['vuln_emb' + str(i) for i in range(32)]
+    cmt_cols = ['cmt_emb' + str(i) for i in range(32)]
+    columns = forrank + feature1_cols + vuln_cols + cmt_cols
+    Col = "{}".format([a for a in columns])
+    Col = Col.replace('[', '')
+    Col = Col.replace(']', '')
+    Col = Col.replace('\'', '')
+    # print(Col)
+    ret = db.session.execute("SELECT {} from vc_feature WHERE cve=\'{}\'".format(Col, CVE))
+    cds = ret.fetchall()
+    list = []
+    length = []
+    for u in cds:
+        result = {}
+        for i in range(len(columns)):
+            result[columns[i]] = u[i]
+        list.append(result)
+        length.append(len(list) - 1)
+    test = pd.DataFrame(list, index=length)
+    #预测
+
+    param = {
+        'max_depth': 5,
+        'eta': 0.05,
+        'verbosity': 1,
+        'random_state': 2021,
+        'objective': 'binary:logistic',
+        'tree_method': 'gpu_hist'
+    }
+
+    def myFeval(preds, dtrain):
+        labels = dtrain.get_label()
+        return 'error', math.sqrt(mean_squared_log_error(preds, labels))
+
+    # print("XGBoost 预测")
+
+    model = xgb.Booster({'nthread': 4})  # init model
+    model.load_model('patchmatch.model')  #导入模型
+    print(test)
+    result = test[['cve', 'commit_id', 'label']]
+    result.loc[:, 'prob_xgb'] = 0
+    X_test = test[feature1_cols + vuln_cols + cmt_cols]# load data
+    predict = model.predict(xgb.DMatrix(X_test))
+
+    result.loc[X_test.index, 'prob_xgb'] = predict
+    print(predict)
+
+    result['rank_xgb'] = get_rank(result, ['prob_xgb'])
+    result.sort_values('rank_xgb',inplace=True)
+    result=result[:][:20]
+
+    # result.to_csv("rank_test.csv", index=False)
+    list = []
+    for row in result.itertuples():
+        # print(row)
+        print(row[2],row[4],row[5])
+        ret = db.session.execute(" select * from totalcommit where commit_id=\'{}\'".format(row[2]))
+        cds = ret.fetchall()
+        columns = ["commit_id", "repo_name", "author", "description", "commit_time"]
+        result = {}
+        for i in range(5):
+            result[columns[i]] = cds[0][i + 1]
+        result["prob_xgb"]=row[4]
+        result["rank_xgb"]=row[5]
+        list.append(result)
+
+
+    return jsonify({
+        'code': 200,
+        'commitlist': list
+    })
+
+
+@app.route('/api/Predict_', methods=['GET'])
+def getPredict_():
+    CVE = request.args.get('CVE',type=str)
     #准备数据
     forrank = ['cve', 'commit_id', 'label']
     feature1_cols = ['addcnt', 'delcnt', 'totalcnt', 'issue_cnt', 'web_cnt', 'bug_cnt', 'cve_cnt', 'time_dis',
