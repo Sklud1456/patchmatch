@@ -10,6 +10,7 @@ import random
 import pandas as pd
 import math
 import xgboost as xgb
+import lightgbm as lgb
 from sklearn.metrics import *
 import re
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -19,11 +20,19 @@ from datetime import datetime
 from flask import Flask, g, jsonify, make_response, request
 from flask_cors import CORS
 from flask_httpauth import HTTPBasicAuth
+import numpy as np
 from flask_sqlalchemy import SQLAlchemy
-# from itsdangerous import TimedJSONWebSignatureSerializer as Serializer
 from itsdangerous import Serializer
 from itsdangerous import BadSignature, SignatureExpired
 from passlib.apps import custom_app_context
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+import torch.optim as optim
+from torch.autograd import Variable
+
 
 from flask_sqlalchemy import SQLAlchemy
 #引入SQLAlchemy,它是一个很强大的关系型数据库框架
@@ -55,6 +64,71 @@ headers={
     'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36',
     # "Cookie": ""
 }
+
+class Net(nn.Module):
+    def __init__(self, num_feature):
+
+        super(Net, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(num_feature, 32),
+            nn.Linear(32, 8),
+            nn.Linear(8, 2)
+        )
+        self.soft = nn.Softmax()
+
+    def forward(self, input_):
+        s1 = self.model(input_)
+        out = self.soft(s1)
+        return out
+
+class FocalLoss(nn.Module):
+    def __init__(self, class_num, alpha=None, gamma=2, size_average=True):
+        super(FocalLoss, self).__init__()
+        if alpha is None:
+            self.alpha = Variable(torch.ones(class_num, 1))
+        else:
+            if isinstance(alpha, Variable):
+                self.alpha = alpha
+            else:
+                self.alpha = Variable(alpha)
+        self.gamma = gamma
+        self.class_num = class_num
+        self.size_average = size_average
+
+    def forward(self, inputs, targets):
+        N = inputs.size(0)
+        C = inputs.size(1)
+        P = F.softmax(inputs, dim=1)
+        class_mask = inputs.data.new(N, C).fill_(0)
+        class_mask = Variable(class_mask)
+        ids = targets.view(-1, 1)
+        class_mask.scatter_(1, ids.data, 1.)
+        if inputs.is_cuda and not self.alpha.is_cuda:
+            self.alpha = self.alpha.cuda()
+        alpha = self.alpha[ids.data.view(-1)]
+        probs = (P*class_mask).sum(1).view(-1, 1)
+        log_p = probs.log()
+        batch_loss = -alpha*(torch.pow((1-probs), self.gamma))*log_p
+        if self.size_average:
+            loss = batch_loss.mean()
+        else:
+            loss = batch_loss.sum()
+        return loss
+
+class CNNDataset(Dataset):
+    def __init__(self, X, y):
+        self.X = torch.tensor(np.array(X), dtype=torch.float)
+        self.y = torch.tensor(np.array(y), dtype=torch.long)
+        self.len = self.X.shape[0]
+
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, idx):
+        data = self.X[idx]
+        label = self.y[idx]
+        return data, label
+
 def get_repo_name(repoid):
     if (repoid==1):
         return "FFmpeg"
@@ -90,6 +164,62 @@ def get_rank(df, sortby, ascending=False):
     df['rank'] = df['level_0']+1
     df = df.sort_values(['index'], ascending=True).reset_index(drop=True)
     return df['rank']
+
+def cnnpre(X_test):
+    lr = 0.001
+    num_workers = 0
+    alpha = 10
+    batch_size = 10000
+    num_epoches = 20
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    criterion = FocalLoss(class_num=2, alpha=torch.tensor([1, 100]))
+    # optimizer = optim.Adam(model.parameters(), lr=lr)
+    test_dataset = CNNDataset(X_test, pd.Series([1]*X_test.shape[0]))
+    # test_dataset = np.expand_dims(test_dataset, 0)
+    num_feature = X_test.shape[1]
+    model = Net(num_feature).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    test_dataloader = DataLoader(dataset=test_dataset,
+                                 batch_size=batch_size,
+                                 shuffle=False,
+                                 num_workers=num_workers,
+                                 pin_memory=False)
+
+    print("CNN 训练 & 预测")
+    model.load_state_dict(torch.load("cnn.ckpt"))
+    with torch.no_grad():
+        predict = []
+        for i, (data, label) in enumerate(test_dataloader):
+            data = data.to(device)
+            pred = model(data)
+            pred = pred.cpu().detach().numpy()
+            # print("111",pred)
+            # print("222",pred[:,1])
+            predict.extend(pred[:,1])
+        predict = np.array(predict)
+        return predict
+
+def fusion_voting(result, cols, suffix=''):
+    def get_closest(row, columns):
+        l = [row[column] for column in columns]
+        l.sort()
+        if l[1] - l[0] >= l[2] - l[1]:
+            return l[1]+l[2]
+        else:
+            return l[1]+l[0]
+
+    result['closest'] = result.apply(
+        lambda row: get_closest(row, cols), axis=1)
+    result['sum'] = 0
+    for column in cols:
+        result['sum'] = result['sum'] + result[column]
+    result['last'] = result['sum'] - result['closest']
+    result['rank_fusion_voting' +
+           suffix] = get_rank(result, ['closest', 'last'], True)
+    result.drop(['sum', 'closest', 'last'], axis=1)
+    return result
+
+
 
 # name: /[\u4e00-\u9fa5]/
 # phone: /^1[34578]\d{9}$/
@@ -415,21 +545,34 @@ def getPredict():
         labels = dtrain.get_label()
         return 'error', math.sqrt(mean_squared_log_error(preds, labels))
 
-    # print("XGBoost 预测")
+    #模型预测
+    X_test = test[feature1_cols + vuln_cols + cmt_cols]  # load data
 
-    model = xgb.Booster({'nthread': 4})  # init model
-    model.load_model('patchmatch.model')  #导入模型
-    print(test)
+    model1 = xgb.Booster({'nthread': 4})  # init model
+    model1.load_model('xgb.model')  #导入模型
     result = test[['cve', 'commit_id', 'label']]
     result.loc[:, 'prob_xgb'] = 0
-    X_test = test[feature1_cols + vuln_cols + cmt_cols]# load data
-    predict = model.predict(xgb.DMatrix(X_test))
+    xgbpredict = model1.predict(xgb.DMatrix(X_test))
 
-    result.loc[X_test.index, 'prob_xgb'] = predict
-    print(predict)
+    model2 = lgb.Booster({'nthread': 4})  # init model
+    model2.load_model('lgb.model')  # 导入模型
+    result.loc[:, 'prob_lgb'] = 0
+    lgbpredict = model2.predict(lgb.DMatrix(X_test))
+
+    cnnpredict = cnnpre(X_test)
+
+    result.loc[X_test.index, 'prob_cnn'] = cnnpredict
+    result.loc[X_test.index, 'prob_lgb'] = lgbpredict
+    result.loc[X_test.index, 'prob_xgb'] = xgbpredict
 
     result['rank_xgb'] = get_rank(result, ['prob_xgb'])
-    result.sort_values('rank_xgb',inplace=True)
+    result['rank_lgb'] = get_rank(result, ['prob_lgb'])
+    result['rank_cnn'] = get_rank(result, ['prob_cnn'])
+
+    tmp_col2 = ['rank_xgb', 'rank_lgb', 'rank_cnn']
+    result = fusion_voting(result, tmp_col2)
+
+    result.sort_values('rank_fusion_voting',inplace=True)
     result=result[:][:20]
 
     # result.to_csv("rank_test.csv", index=False)
@@ -444,7 +587,7 @@ def getPredict():
         for i in range(5):
             result[columns[i]] = cds[0][i + 1]
         result["prob_xgb"]=row[4]
-        result["rank_xgb"]=row[5]
+        result["rank_fusion_voting"]=row[5]
         list.append(result)
 
 
