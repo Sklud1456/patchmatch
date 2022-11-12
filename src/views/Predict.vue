@@ -59,9 +59,9 @@
                 </el-table-column>
                 <el-table-column prop="repo_name" label="Warehouse Name" width="120" >
                 </el-table-column>
-                <el-table-column prop="prob_xgb" label="Predict Score" width="140" >
+                <el-table-column prop="prob" label="Predict Score" width="140" >
                 </el-table-column>
-                <el-table-column prop="rank_xgb" label="Rank" width="80">
+                <el-table-column prop="rank" label="Rank" width="80">
                 </el-table-column>
                 <el-table-column label="Operation" width="160">
                   <template scope="scope">

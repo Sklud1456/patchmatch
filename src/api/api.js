@@ -58,7 +58,7 @@ export const getSignalCVE = params => {
 };
 
 export const getPredictRank = params => {
-    return axios.get(`${base}/Predict`,{ params: params });
+    return axios.get(`${base}/Predict_`,{ params: params });
 };
 
 export const CheckCommit = params => {
