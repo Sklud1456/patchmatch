@@ -34,7 +34,7 @@ from torch.autograd import Variable
 
 
 from flask_sqlalchemy import SQLAlchemy
-#引入SQLAlchemy,它是一个很强大的关系型数据库框架
+
 db = SQLAlchemy()
 
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -170,7 +170,8 @@ def cnnpre(X_test):
     alpha = 10
     batch_size = 10000
     num_epoches = 20
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     criterion = FocalLoss(class_num=2, alpha=torch.tensor([1, 100]))
     # optimizer = optim.Adam(model.parameters(), lr=lr)
     test_dataset = CNNDataset(X_test, pd.Series([1]*X_test.shape[0]))
@@ -185,7 +186,7 @@ def cnnpre(X_test):
                                  pin_memory=False)
 
     # print("CNN train & predict")
-    model.load_state_dict(torch.load("cnn.ckpt"))
+    model.load_state_dict(torch.load("cnn.ckpt",map_location=torch.device('cpu')))
     with torch.no_grad():
         predict = []
         for i, (data, label) in enumerate(test_dataloader):
@@ -464,6 +465,7 @@ def getSingalCVE():
         'cve':cve
     })
 
+#this function just use xgb model,but is enough in sometime,if you want change just modify the api in api.js
 @app.route('/api/Predict', methods=['GET'])
 def getPredict():
     CVE = request.args.get('CVE',type=str)
@@ -510,7 +512,7 @@ def getPredict():
     # print("XGBoost predict")
 
     model = xgb.Booster({'nthread': 4})  # init model
-    model.load_model('patchmatch.model')  #import model
+    model.load_model('xgb.model')  #import model
     print(test)
     result = test[['cve', 'commit_id', 'label']]
     result.loc[:, 'prob_xgb'] = 0
@@ -518,7 +520,7 @@ def getPredict():
     predict = model.predict(xgb.DMatrix(X_test))
 
     result.loc[X_test.index, 'prob_xgb'] = predict
-    print(predict)
+    # print(predict)
 
     result['rank_xgb'] = get_rank(result, ['prob_xgb'])
     result.sort_values('rank_xgb',inplace=True)
@@ -528,15 +530,15 @@ def getPredict():
     list = []
     for row in result.itertuples():
         # print(row)
-        print(row[2],row[4],row[5])
+        # print(row[2],row[4],row[5])
         ret = db.session.execute(" select * from totalcommit where commit_id=\'{}\'".format(row[2]))
         cds = ret.fetchall()
         columns = ["commit_id", "repo_name", "author", "description", "commit_time"]
         result = {}
         for i in range(5):
             result[columns[i]] = cds[0][i + 1]
-        result["prob_xgb"]=row[4]
-        result["rank_xgb"]=row[5]
+        result["prob"]=row[4]#just show the xgb score,the important one
+        result["rank"]=row[5]
         list.append(result)
 
 
@@ -545,9 +547,10 @@ def getPredict():
         'commitlist': list
     })
 
-
+#this function use vcmatch model,the default model
 @app.route('/api/Predict_', methods=['GET'])
 def getPredict_():
+    print("sosossosososo")
     CVE = request.args.get('CVE',type=str)
     #prepare data
     forrank = ['cve', 'commit_id', 'label']
@@ -592,20 +595,22 @@ def getPredict_():
 
     #model predict
     X_test = test[feature1_cols + vuln_cols + cmt_cols]  # load data
-
+    print("loadover")
     model1 = xgb.Booster({'nthread': 4})  # init model
     model1.load_model('xgb.model')  #import model
     result = test[['cve', 'commit_id', 'label']]
     result.loc[:, 'prob_xgb'] = 0
     xgbpredict = model1.predict(xgb.DMatrix(X_test))
-
-    model2 = lgb.Booster({'nthread': 4})  # init model
-    model2.load_model('lgb.model')  # import model
+    print("xgbover")
+    model2 = lgb.Booster(model_file='lgb.model')  # init model
+    # model2.load_model('lgb.model')  # import model
     result.loc[:, 'prob_lgb'] = 0
-    lgbpredict = model2.predict(lgb.DMatrix(X_test))
+    lgbpredict = model2.predict(X_test)
+    print("lgbover")
 
     cnnpredict = cnnpre(X_test)
-
+    print("cnnover")
+    print("yucewanbi")
     result.loc[X_test.index, 'prob_cnn'] = cnnpredict
     result.loc[X_test.index, 'prob_lgb'] = lgbpredict
     result.loc[X_test.index, 'prob_xgb'] = xgbpredict
@@ -613,26 +618,26 @@ def getPredict_():
     result['rank_xgb'] = get_rank(result, ['prob_xgb'])
     result['rank_lgb'] = get_rank(result, ['prob_lgb'])
     result['rank_cnn'] = get_rank(result, ['prob_cnn'])
-
+    print("rank")
     tmp_col2 = ['rank_xgb', 'rank_lgb', 'rank_cnn']
     result = fusion_voting(result, tmp_col2)
 
     result.sort_values('rank_fusion_voting',inplace=True)
     result=result[:][:20]
-
+    print("rankover")
     # result.to_csv("rank_test.csv", index=False)
     list = []
     for row in result.itertuples():
-        # print(row)
-        print(row[2],row[4],row[5])
+        # print(row[7],row[8],row[9],row[10],row[11],row[12],row[13])
+        # print(row[0],row[1],row[2],row[3],row[4],row[5],row[6])
         ret = db.session.execute(" select * from totalcommit where commit_id=\'{}\'".format(row[2]))
         cds = ret.fetchall()
         columns = ["commit_id", "repo_name", "author", "description", "commit_time"]
         result = {}
         for i in range(5):
             result[columns[i]] = cds[0][i + 1]
-        result["prob_xgb"]=row[4]
-        result["rank_fusion_voting"]=row[5]
+        result["prob"]=row[4]
+        result["rank"]=row[13]
         list.append(result)
 
 
