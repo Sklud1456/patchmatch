@@ -21,7 +21,6 @@ from flask import Flask, g, jsonify, make_response, request
 from flask_cors import CORS
 from flask_httpauth import HTTPBasicAuth
 import numpy as np
-from flask_sqlalchemy import SQLAlchemy
 from itsdangerous import Serializer
 from itsdangerous import BadSignature, SignatureExpired
 from passlib.apps import custom_app_context
@@ -42,7 +41,7 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 
 app = Flask(__name__)
 
-# r'/*' 是通配符，让本服务器所有的 URL 都允许跨域请求
+# r'/*' is a wildcard character that allows cross domain requests for all URLs in this server
 CORS(app, resources=r'/*')
 app.config['SECRET_KEY'] = 'hard to guess string'
 app.config['SQLALCHEMY_COMMIT_ON_TEARDOWN'] = True
@@ -52,7 +51,7 @@ app.config['SQLALCHEMY_RECORD_QUERIES'] = True
 #     os.path.join(basedir, 'data.sqlite')
 
 app.config['SQLALCHEMY_DATABASE_URI'] = "mysql://root:skd1116@localhost:3306/flasktest?charset=utf8mb4"
-#如果设置成 True (默认情况)，Flask-SQLAlchemy 将会追踪对象的修改并且发送信号。这需要额外的内存， 如果不必要的可以禁用它。
+#If set to True (the default), Flask SQLAlchemy will track object changes and send signals. This requires additional memory, which can be disabled if unnecessary.
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = True
 
 db.init_app(app)
@@ -185,7 +184,7 @@ def cnnpre(X_test):
                                  num_workers=num_workers,
                                  pin_memory=False)
 
-    print("CNN 训练 & 预测")
+    # print("CNN train & predict")
     model.load_state_dict(torch.load("cnn.ckpt"))
     with torch.no_grad():
         predict = []
@@ -225,41 +224,6 @@ def fusion_voting(result, cols, suffix=''):
 # phone: /^1[34578]\d{9}$/
 # class: /[a-zA-Z0-9_\u4e00-\u9fa5]+/
 # email: /^\w+@\w+\.\w+$/
-
-
-# @auth.verify_password
-# def verify_password(name_or_token, password):
-#     print("1:",password)
-#     if not name_or_token:
-#         return False
-#     name_or_token = re.sub(r'^"|"$', '', name_or_token)
-#     admin = Admin.verify_auth_token(name_or_token)
-#     if not admin:
-#         admin = Admin.query.filter_by(name=name_or_token).first()
-#         if not admin or not admin.verify_password(password):
-#             return False
-#     g.admin = admin
-#     return True
-
-
-# @app.route('/api/login', methods=['POST'])
-# # @auth.login_required
-# def get_auth_token():
-#     token = g.admin.generate_auth_token()
-#     print("1242")
-#     return jsonify({'code': 200, 'msg': "登录成功", 'token': token.decode('ascii'), 'name': g.admin.name})
-#
-#
-# @app.route('/api/setpwd', methods=['POST'])
-# # @auth.login_required
-# def set_auth_pwd():
-#     data = json.loads(str(request.data, encoding="utf-8"))
-#     admin = Admin.query.filter_by(name=g.admin.name).first()
-#     if admin and admin.verify_password(data['oldpass']) and data['confirpass'] == data['newpass']:
-#         admin.hash_password(data['newpass'])
-#         return jsonify({'code': 200, 'msg': "密码修改成功"})
-#     else:
-#         return jsonify({'code': 500, 'msg': "请检查输入"})
 
 @app.route('/api/CommitPage', methods=['GET'])
 def get_gitcommit_list():
@@ -503,7 +467,7 @@ def getSingalCVE():
 @app.route('/api/Predict', methods=['GET'])
 def getPredict():
     CVE = request.args.get('CVE',type=str)
-    #准备数据
+    #prepare data
     forrank = ['cve', 'commit_id', 'label']
     feature1_cols = ['addcnt', 'delcnt', 'totalcnt', 'issue_cnt', 'web_cnt', 'bug_cnt', 'cve_cnt', 'time_dis',
                      'inter_token_cwe_cnt', 'inter_token_cwe_ratio', 'vuln_commit_tfidf', 'cve_match',
@@ -517,7 +481,6 @@ def getPredict():
     Col = Col.replace('[', '')
     Col = Col.replace(']', '')
     Col = Col.replace('\'', '')
-    # print(Col)
     ret = db.session.execute("SELECT {} from vc_feature WHERE cve=\'{}\'".format(Col, CVE))
     cds = ret.fetchall()
     list = []
@@ -529,7 +492,7 @@ def getPredict():
         list.append(result)
         length.append(len(list) - 1)
     test = pd.DataFrame(list, index=length)
-    #预测
+    #predict
 
     param = {
         'max_depth': 5,
@@ -544,10 +507,10 @@ def getPredict():
         labels = dtrain.get_label()
         return 'error', math.sqrt(mean_squared_log_error(preds, labels))
 
-    # print("XGBoost 预测")
+    # print("XGBoost predict")
 
     model = xgb.Booster({'nthread': 4})  # init model
-    model.load_model('patchmatch.model')  #导入模型
+    model.load_model('patchmatch.model')  #import model
     print(test)
     result = test[['cve', 'commit_id', 'label']]
     result.loc[:, 'prob_xgb'] = 0
@@ -586,7 +549,7 @@ def getPredict():
 @app.route('/api/Predict_', methods=['GET'])
 def getPredict_():
     CVE = request.args.get('CVE',type=str)
-    #准备数据
+    #prepare data
     forrank = ['cve', 'commit_id', 'label']
     feature1_cols = ['addcnt', 'delcnt', 'totalcnt', 'issue_cnt', 'web_cnt', 'bug_cnt', 'cve_cnt', 'time_dis',
                      'inter_token_cwe_cnt', 'inter_token_cwe_ratio', 'vuln_commit_tfidf', 'cve_match',
@@ -612,7 +575,7 @@ def getPredict_():
         list.append(result)
         length.append(len(list) - 1)
     test = pd.DataFrame(list, index=length)
-    #预测
+    #predict
 
     param = {
         'max_depth': 5,
@@ -627,17 +590,17 @@ def getPredict_():
         labels = dtrain.get_label()
         return 'error', math.sqrt(mean_squared_log_error(preds, labels))
 
-    #模型预测
+    #model predict
     X_test = test[feature1_cols + vuln_cols + cmt_cols]  # load data
 
     model1 = xgb.Booster({'nthread': 4})  # init model
-    model1.load_model('xgb.model')  #导入模型
+    model1.load_model('xgb.model')  #import model
     result = test[['cve', 'commit_id', 'label']]
     result.loc[:, 'prob_xgb'] = 0
     xgbpredict = model1.predict(xgb.DMatrix(X_test))
 
     model2 = lgb.Booster({'nthread': 4})  # init model
-    model2.load_model('lgb.model')  # 导入模型
+    model2.load_model('lgb.model')  # import model
     result.loc[:, 'prob_lgb'] = 0
     lgbpredict = model2.predict(lgb.DMatrix(X_test))
 
@@ -685,18 +648,17 @@ def update_CVE_Commit():
     CVE_id = request.args.get('CVE_id', type=str)
     print("ss:"+Commit_id)
     print(CVE_id)
-    # return jsonify({'code': 200, 'msg': "更新成功"})
     if Commit_id:
         ret = db.session.execute("update cve set patch_gitcommit=\'{0}\' where CVE_id= \'{1}\'".format(Commit_id,CVE_id))
         print(ret)
-        return jsonify({'code': 200, 'msg': "更新成功"})
+        return jsonify({'code': 200, 'msg': "update successful"})
     else:
-        return jsonify({'code': 500, 'msg': "未知错误"})
+        return jsonify({'code': 500, 'msg': "Error"})
 
 @app.route('/api/test', methods=['GET'])
+#a test function
 def gettest():
     CVE = "CVE-2000-1254"
-    #现阶段先随机生成
     # ran=random.randint(1, 5000)
 
     forrank = ['cve', 'commit_id', 'label']
@@ -835,10 +797,10 @@ def add_newCommit():
     ret = db.session.execute(" SELECT latest_commit from repo where repo_name=\'{}\'".format(reponame))
     cds=ret.fetchall()
     commit_id = str(cds[0][0])
+    # this path is the repopath on you personal computer
     repo = git.Repo('D:/skd/study/Vulnerabilities/data/gitrepo/{}'.format(reponame))
     i=0
     latestcommit=""
-    print("ssss",commit_id)
     listcommit=[]
     for item in repo.iter_commits():
         commit = repo.commit(str(item))
@@ -847,7 +809,7 @@ def add_newCommit():
             latestcommit=str(item)
 
         if(str(item)==commit_id):
-            print("waell")
+            print("Nop")
             break
         else:
 
