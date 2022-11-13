@@ -14,14 +14,14 @@ Also, due to different database Settings on your personal computer, you need to 
 
 > Second, prepare the environment required for python
 
-The main packages you need are listed in requirements.txt and it can be adjusted according to your computer configuration. You can use pip or conda to install them. For one-click installation, the pip command is as follows:
+The main libraries you need are listed in requirements.txt and it can be adjusted according to your computer configuration. You can use pip or conda to install them. For one-click installation, the pip command is as follows:
 
 ```python
 activate (yourenv)#Enter the specified virtual environment on your computer
 (yourenv)pip install -r requirements.txt
 ```
 
-But I don't recommend it, because different computers have different configurations and may not be compatible with versions of these packages.
+But I don't recommend it, because different computers have different configurations and may not be compatible with versions of these libraries.
 
 > Then use the npm command to build the required front-end environment
 ```python
