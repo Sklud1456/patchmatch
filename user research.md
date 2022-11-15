@@ -105,7 +105,7 @@ The Scoring Example of the animation of charts:
 9 to 10 points: Very good. It's very smooth to use, and the information can be presented in a way that suits my usage habits
 ```
 
-#### Scores for the overall use
+#### The score for the overall use
 
 The overall feeling of use
 
